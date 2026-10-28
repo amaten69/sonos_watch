@@ -2,6 +2,7 @@ from queue import Empty
 
 import logging
 from logging.handlers import TimedRotatingFileHandler
+import xml.etree.ElementTree as ET
 import soco
 from pprint import pprint
 from soco import events
@@ -80,7 +81,7 @@ def get_unsubscribe_check(config):
     subscribe_refresh_rand_minutes = int(config['EVENT_TIMERS']['subscribe_refresh_rand_minutes'])
     
     base_count = subscribe_refresh_hours * (3600/event_buffer_timeout)
-    random_count = int(random.randrange(subscribe_refresh_rand_minutes*(60/event_buffer_timeout)))
+    random_count = random.randrange(int(subscribe_refresh_rand_minutes*(60/event_buffer_timeout)))
     return base_count+random_count
     
 
@@ -127,16 +128,13 @@ def device_listen(device, config):
                     if not is_playing:
                         LOG_RUN.info(f"{name} - now playing")
                         is_playing = True
-                        if name == "Whitenoise":
-                            wn_nap_check(device, config, state)
                         
                     pause_time = ""
                 if state == "PAUSED_PLAYBACK" and is_playing:
                     pause_time = datetime.now()
                     LOG_RUN.info(f"{name} - now paused")
                     is_playing = False
-                    if name == "Whitenoise":
-                        wn_nap_check(device, config, state)
+                    
                 #log song changes
                 if state == "PLAYING" and song != lastsong and song != "":
                     LOG_SONG.info(f"{name} - {song}")
@@ -163,52 +161,6 @@ def device_listen(device, config):
     except:
         LOG.exception("error in device thread")
                 
-def wn_nap_check(device, config, state):
-    global WN_NAP_START
-    nap_assume_start = time(int(config['NAP_CONFIG']['nap_assume_start'].split(":")[0]),int(config['NAP_CONFIG']['nap_assume_start'].split(":")[1]))
-    #the last time we assume a nap whitenoise would start
-    nap_assume_end = time(int(config['NAP_CONFIG']['nap_assume_end'].split(":")[0]),int(config['NAP_CONFIG']['nap_assume_end'].split(":")[1]))
-    now = datetime.now().time()
-    is_assumed_nap = isNowInTimePeriod(nap_assume_start, nap_assume_end, now)
-    if state == "PLAYING":
-        if is_assumed_nap:
-            time_change = timedelta(minutes=int(config['NAP_CONFIG']['nap_length_minutes']))
-            nap_over = datetime.strftime(datetime.now() + time_change,"%H:%M")
-            status_nap = "Started ({0} minutes from now is {1})".format(config['NAP_CONFIG']['nap_length_minutes'],nap_over)
-            WN_NAP_START = datetime.now()
-        status = "Started"
-    else:
-        status = "Paused"
-        status_nap = "Paused" 
-
-    if is_assumed_nap or WN_NAP_START != "":
-        slack_post(config['NAP_CONFIG']['slack_webhook'],f"WhiteNoise {status_nap}")
-        slack_post(config['CLARA_LOGS']['slack_webhook'],f"WhiteNoise {status}")
-    else:
-        slack_post(config['CLARA_LOGS']['slack_webhook'],f"WhiteNoise {status}")
-    
-    if WN_NAP_START != "" and state != "PLAYING":
-        WN_NAP_START = ""
-    
-
-def slack_post(url, msg):
-    print("not doing slack, hers the message: ",msg)
-    #try:
-        #webhook = WebhookClient(url)
-        #response = webhook.send(text=msg)
-        #if response.status_code != 200:
-            #LOG.error("Error posting to slack: {0} - {1}".format(response.status_code,response.body))
-    #except:
-        #LOG.exception("exception posting to slack")
-
-
-def isNowInTimePeriod(startTime, endTime, nowTime): 
-    if startTime < endTime: 
-        return nowTime >= startTime and nowTime <= endTime 
-    else: 
-        #Over midnight: 
-        return nowTime >= startTime or nowTime <= endTime 
-
 def has_dc_session(track):
     try:
         metadata_uri = xmltodict.parse(track)
@@ -249,122 +201,6 @@ def kill_all(config):
 def kill_all_thread(config):
     t = threading.Thread(target=kill_all, args=(config,),daemon=True)
     t.start()
-
-def clara_wn(config):
-    LOG_RUN.info("Running clara whitenoise maintenance")
-    dont_manage = config['POLLERS']['dont_manage'].split(',')
-    devices = soco.discover()
-    for device in devices:
-        name = device.player_name
-        if name in dont_manage:
-            LOG_RUN.info("clearing queue on clara whitenoise")
-            device.clear_queue()
-            continue
-
-def clara_wn_thread(config):
-    t = threading.Thread(target=clara_wn, args=(config,),daemon=True)
-    t.start()
-
-def wn_device_deets(device):
-    try:
-        play_status = device.get_current_transport_info()['current_transport_state']
-        volume = device.volume
-        current_track = device.get_current_track_info()['title']
-    except:
-        LOG.error("wnka: error getting play statuses")
-        play_status = "PLAYING"
-        volume = 10
-        current_track = "unknown"
-    return play_status, volume, current_track
-
-def wn_get_end_time(dt_start,end_time):
-    #assume end time is todays date.
-    today = str(dt_start.strftime("%m/%d/%Y "))
-    tomorrow = (dt_start+timedelta(days=1)).strftime("%m/%d/%Y ")
-    proposed_end_today = datetime.strptime(today+end_time,'%m/%d/%Y %H:%M')
-    proposed_end_tommorrow = datetime.strptime(tomorrow+end_time,'%m/%d/%Y %H:%M')
-    if proposed_end_today<dt_start:
-        return proposed_end_tommorrow
-    else:
-        return proposed_end_today       
-
-
-def wn_restart_wn(device):
-    try:
-        #print(device.mute)
-        device.volume = 10
-        sleep_time.sleep(2)
-        device.play()
-        sleep_time.sleep(60)
-        device.volume = 20
-        sleep_time.sleep(60)
-        device.volume = 30
-        sleep_time.sleep(60)
-        device.volume = 36
-    except:
-        LOG.exception("Error restarting whitenoise")        
-    
-
-def wn_keep_alive(config):
-    device_name = config['WHITENOISE_KEEPALIVE']['device_name']
-    whitenoise_track = config['WHITENOISE_KEEPALIVE']['whitenoise_track']
-    end_time = config['WHITENOISE_KEEPALIVE']['end_time']
-    poll_time_seconds = int(config['WHITENOISE_KEEPALIVE']['poll_time_seconds'])
-    
-    playing_states = ["PLAYING"]
-    
-    dt_start = datetime.now()
-    dt_end = wn_get_end_time(dt_start,end_time)
-    LOG.info(f"wnka: Starting monitoring till {dt_end}")
-
-    devices = soco.discover()
-    for device in devices:
-        name = device.player_name
-        if name == device_name:
-            current_time = datetime.now()
-            while current_time < dt_end:
-                #LOG.info("wkna: tick")
-                try:
-                    play_status, volume, current_track = wn_device_deets(device)
-                except:
-                    LOG.exception("wnka: error getting play status")
-                    play_status = "PLAYING"
-                    current_track = "unknown"
-
-                #LOG.info("playing status: {0} volume: {1} track: {2}".format(play_status,volume,current_track))
-                if current_track == whitenoise_track and play_status not in playing_states:
-                    LOG.info("wnka: pause detected, attempting to restart")
-                    slack_post(config['CLARA_LOGS']['slack_webhook'],"whitenoise paused, attempting restart")
-                    wn_restart_wn(device)
-                    LOG.info("finished restart")
-                    slack_post(config['CLARA_LOGS']['slack_webhook'],"restart finished")
-                current_time = datetime.now()
-                sleep_time.sleep(poll_time_seconds)
-    
-    LOG.info("wnka: stopping monitoring")
-
-
-def wn_keep_alive_thread(config):
-    t = threading.Thread(target=wn_keep_alive, args=(config,),daemon=True)
-    t.start()
-
-def wn_unmute_stop(config):
-    device_name = config['WHITENOISE_KEEPALIVE']['device_name']
-    LOG.info("wkna: Checking if whitenoise is in mute status")
-
-    devices = soco.discover()
-    for device in devices:
-        name = device.player_name
-        if name == device_name:
-            if device.mute:
-                LOG.info("wkna: Device is in mute, stopping and unmuting")
-                try:
-                    device.stop()
-                    LOG_RUN.info("Whitenoise - stopping")
-                    slack_post(config['CLARA_LOGS']['slack_webhook'],"WhiteNoise auto Paused")
-                    device.mute = False
-                except:
-                    LOG.exception("error stopping and unmuting")
 
 def rerun_threads(config):
     #en-numerate all threads
@@ -460,16 +296,11 @@ def main():
     #scheduler
     maintenance_time = config['SCHEDUELE_TIMERS']['maintenance_time']
     check_threads_minutes = int(config['SCHEDUELE_TIMERS']['check_threads_minutes'])
-    clara_wn_maintenance_time = config['SCHEDUELE_TIMERS']['clara_wn_maintenance_time']
-    wnka_start_time = config['WHITENOISE_KEEPALIVE']['start_time']
-    wnka_unmute_time = config['WHITENOISE_KEEPALIVE']['unmute_time']
     
-    #schedule.every(1).day.at(maintenance_time).do(kill_all_thread, config=config)
-    #schedule.every(check_threads_minutes).minutes.do(check_threads, config=config)
+    schedule.every(1).day.at(maintenance_time).do(kill_all_thread, config=config)
+    schedule.every(check_threads_minutes).minutes.do(check_threads, config=config)
     #schedule.every(10).seconds.do(poll_dc_devices) no more polled devices
-    #schedule.every().wednesday.at(clara_wn_maintenance_time).do(clara_wn_thread, config=config)
-    #schedule.every(1).day.at(wnka_start_time).do(wn_keep_alive_thread, config=config)
-    #schedule.every(1).day.at(wnka_unmute_time).do(wn_unmute_stop, config=config)
+    
     initialize_last_status(poll_only)
         
     devices = soco.discover()

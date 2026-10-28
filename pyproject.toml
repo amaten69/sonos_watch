@@ -1,0 +1,25 @@
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sonos-watch"
+version = "0.1.0"
+description = "Monarch Money sync and other widgets"
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+dependencies = [
+    "soco==0.32.0",
+    "schedule==1.2.2",
+]
+
+[project.scripts]
+monarch-widgets = "sonos_watch.events:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sonos_watch"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
