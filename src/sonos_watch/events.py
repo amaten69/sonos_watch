@@ -24,7 +24,7 @@ LOG_FORMAT_RUN = '[%(asctime)s]\t%(message)s'
 LOG = logging.getLogger()
 LOG_RUN = logging.getLogger('run')
 LOG_SONG = logging.getLogger('song')
-CONFIG_LOCATIONS = [".\\events.conf"]
+CONFIG_LOCATIONS = [".\\events.conf","/events.conf"]
 
 device_threads = []
 LAST_STATUS = {}

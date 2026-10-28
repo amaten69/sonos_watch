@@ -1,0 +1,25 @@
+[Unit]
+Description=My Python Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+User=amaten
+# Group=myapp
+
+WorkingDirectory=/home/amaten/pentair_monitor
+
+ExecStart=/home/amaten/sonos_watch/sonos-watch
+
+Restart=always
+RestartSec=60
+
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
